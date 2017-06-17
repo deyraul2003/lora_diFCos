@@ -99,7 +99,8 @@ void HW_SPI_Init( void )
   hspi.Init.CLKPolarity    = SPI_POLARITY_LOW;
   hspi.Init.CLKPhase       = SPI_PHASE_1EDGE;
   hspi.Init.DataSize       = SPI_DATASIZE_8BIT;
-  hspi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;  
+  hspi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi.Init.CRCPolynomial  = 1;
   hspi.Init.FirstBit       = SPI_FIRSTBIT_MSB;
   hspi.Init.NSS            = SPI_NSS_SOFT;
   hspi.Init.TIMode         = SPI_TIMODE_DISABLE;
