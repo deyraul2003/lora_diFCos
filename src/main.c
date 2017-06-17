@@ -111,18 +111,8 @@ Maintainer: Miguel Luis and Gregory Cristian
     #error "Please define a modem in the compiler options."
 #endif
 
-typedef enum
-{
-    LOWPOWER,
-    RX,
-    RX_TIMEOUT,
-    RX_ERROR,
-    TX,
-    TX_TIMEOUT,
-}States_t;
-
-#define RX_TIMEOUT_VALUE                            1000
-#define BUFFER_SIZE                                 64 // Define the payload size here
+#define RX_TIMEOUT_VALUE            3000
+#define BUFFER_SIZE                 64 // Define the payload size here
 #define LED_PERIOD_MS               200
 
 #define LEDS_OFF   do{ \
@@ -132,16 +122,26 @@ typedef enum
                    LED_Off( LED_GREEN2 ) ; \
                    } while(0) ;
 
-const uint8_t PingMsg[] = "PING";
-const uint8_t PongMsg[] = "PONG";
+//typedef enum {
+//    ST_LOW_POWER,
+//    ST_RX,
+//    ST_RX_TIMEOUT,
+//    ST_RX_ERROR,
+//    ST_TX,
+//    ST_TX_TIMEOUT,
+//} States;
+//
+//
+//const uint8_t PingMsg[] = "PING";
+//const uint8_t PongMsg[] = "PONG";
 
-uint16_t BufferSize = BUFFER_SIZE;
-uint8_t Buffer[BUFFER_SIZE];
-
-States_t State = LOWPOWER;
+uint8_t _buffer[BUFFER_SIZE];
+//States _state = ST_LOW_POWER;
 
 int8_t RssiValue = 0;
 int8_t SnrValue = 0;
+
+uint32_t rxTimeoutFlag;
 
  /* Led Timers objects*/
 static  TimerEvent_t timerLed;
@@ -155,85 +155,91 @@ static RadioEvents_t RadioEvents;
 /*!
  * \brief Function to be executed on Radio Tx Done event
  */
-void OnTxDone( void );
+void OnTxDone(void);
 
 /*!
  * \brief Function to be executed on Radio Rx Done event
  */
-void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr );
+void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr);
 
 /*!
  * \brief Function executed on Radio Tx Timeout event
  */
-void OnTxTimeout( void );
+void OnTxTimeout(void);
 
 /*!
  * \brief Function executed on Radio Rx Timeout event
  */
-void OnRxTimeout( void );
+void OnRxTimeout(void);
 
 /*!
  * \brief Function executed on Radio Rx Error event
  */
-void OnRxError( void );
+void OnRxError(void);
 
 /*!
  * \brief Function executed on when led timer elapses
  */
-static void OnledEvent( void );
+static void OnledEvent(void);
+
+
+/*!
+ * \brief Function executed on when led timer elapses
+ */
+static void OnUserButtonEvent(void);
+
+
 /**
  * Main application entry point.
  */
-int main( void )
-{
-  bool isMaster = true;
-  uint8_t i;
+int main(void) {
+    uint8_t i;
 
-  HAL_Init( );
-  
-  SystemClock_Config( );
-  
-  DBG_Init( );
+    HAL_Init();
+    SystemClock_Config();
+    DBG_Init();
+    HW_Init();
 
-  HW_Init( );  
-  
-  /* Led Timers*/
-  TimerInit(&timerLed, OnledEvent);   
-  TimerSetValue( &timerLed, LED_PERIOD_MS);
+    BSP_PB_Init(BUTTON_USER, BUTTON_MODE_GPIO);
+    BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
+    HW_GPIO_SetIrq(USER_BUTTON_GPIO_PORT, USER_BUTTON_PIN, 0, OnUserButtonEvent);
 
-  TimerStart(&timerLed );
+    /* Led Timers*/
+    TimerInit(&timerLed, OnledEvent);
+    TimerSetValue(&timerLed, LED_PERIOD_MS);
 
-  // Radio initialization
-  RadioEvents.TxDone = OnTxDone;
-  RadioEvents.RxDone = OnRxDone;
-  RadioEvents.TxTimeout = OnTxTimeout;
-  RadioEvents.RxTimeout = OnRxTimeout;
-  RadioEvents.RxError = OnRxError;
+    TimerStart(&timerLed );
 
-  Radio.Init( &RadioEvents );
+    // Radio initialization
+    RadioEvents.TxDone = OnTxDone;
+    RadioEvents.RxDone = OnRxDone;
+    RadioEvents.TxTimeout = OnTxTimeout;
+    RadioEvents.RxTimeout = OnRxTimeout;
+    RadioEvents.RxError = OnRxError;
 
-  Radio.SetChannel( RF_FREQUENCY );
+    Radio.Init(&RadioEvents);
+    Radio.SetChannel(RF_FREQUENCY);
 
-#if defined( USE_MODEM_LORA )
+#if defined(USE_MODEM_LORA)
 
-  Radio.SetTxConfig( MODEM_LORA, TX_OUTPUT_POWER, 0, LORA_BANDWIDTH,
+    Radio.SetTxConfig( MODEM_LORA, TX_OUTPUT_POWER, 0, LORA_BANDWIDTH,
                                  LORA_SPREADING_FACTOR, LORA_CODINGRATE,
                                    LORA_PREAMBLE_LENGTH, LORA_FIX_LENGTH_PAYLOAD_ON,
                                    true, 0, 0, LORA_IQ_INVERSION_ON, 3000000 );
     
-  Radio.SetRxConfig( MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR,
+    Radio.SetRxConfig( MODEM_LORA, LORA_BANDWIDTH, LORA_SPREADING_FACTOR,
                                    LORA_CODINGRATE, 0, LORA_PREAMBLE_LENGTH,
                                    LORA_SYMBOL_TIMEOUT, LORA_FIX_LENGTH_PAYLOAD_ON,
                                    0, true, 0, 0, LORA_IQ_INVERSION_ON, true );
 
-#elif defined( USE_MODEM_FSK )
+#elif defined(USE_MODEM_FSK)
 
-  Radio.SetTxConfig( MODEM_FSK, TX_OUTPUT_POWER, FSK_FDEV, 0,
+    Radio.SetTxConfig( MODEM_FSK, TX_OUTPUT_POWER, FSK_FDEV, 0,
                                   FSK_DATARATE, 0,
                                   FSK_PREAMBLE_LENGTH, FSK_FIX_LENGTH_PAYLOAD_ON,
                                   true, 0, 0, 0, 3000000 );
     
-  Radio.SetRxConfig( MODEM_FSK, FSK_BANDWIDTH, FSK_DATARATE,
+    Radio.SetRxConfig( MODEM_FSK, FSK_BANDWIDTH, FSK_DATARATE,
                                   0, FSK_AFC_BANDWIDTH, FSK_PREAMBLE_LENGTH,
                                   0, FSK_FIX_LENGTH_PAYLOAD_ON, 0, true,
                                   0, 0,false, true );
@@ -241,189 +247,106 @@ int main( void )
 #else
     #error "Please define a frequency band in the compiler options."
 #endif
-                                  
-  Radio.Rx( RX_TIMEOUT_VALUE );
-                                  
-  while( 1 )
-  {
-    switch( State )
-    {
-    case RX:
-      if( isMaster == true )
-      {
-        if( BufferSize > 0 )
-        {
-          if( strncmp( ( const char* )Buffer, ( const char* )PongMsg, 4 ) == 0 )
-          {
-            TimerStop(&timerLed );
-            LED_Off( LED_BLUE);
-            LED_Off( LED_GREEN ) ; 
-            LED_Off( LED_RED1 ) ;;
-            // Indicates on a LED that the received frame is a PONG
-            LED_Toggle( LED_RED2 ) ;
 
+//#define SENDER
+#ifdef SENDER
+    while(true) {
+        // exit low power
 
-            // Send the next PING frame      
-            Buffer[0] = 'P';
-            Buffer[1] = 'I';
-            Buffer[2] = 'N';
-            Buffer[3] = 'G';
-            // We fill the buffer with numbers for the payload 
-            for( i = 4; i < BufferSize; i++ )
-            {
-              Buffer[i] = i - 4;
-            }
-            PRINTF("...PING\n");
-
-            DelayMs( 1 ); 
-            Radio.Send( Buffer, BufferSize );
-            }
-            else if( strncmp( ( const char* )Buffer, ( const char* )PingMsg, 4 ) == 0 )
-            { // A master already exists then become a slave
-              isMaster = false;
-              //GpioWrite( &Led2, 1 ); // Set LED off
-              Radio.Rx( RX_TIMEOUT_VALUE );
-            }
-            else // valid reception but neither a PING or a PONG message
-            {    // Set device as master ans start again
-              isMaster = true;
-              Radio.Rx( RX_TIMEOUT_VALUE );
-            }
-          }
+        // read button state
+        if(BSP_PB_GetState(BUTTON_USER)) {
+            _buffer[0] = 'o';
+            _buffer[1] = 'f';
+            _buffer[2] = 'f';
+            _buffer[3] = 0x00;
         }
-        else
-        {
-          if( BufferSize > 0 )
-          {
-            if( strncmp( ( const char* )Buffer, ( const char* )PingMsg, 4 ) == 0 )
-            {
-              // Indicates on a LED that the received frame is a PING
-              TimerStop(&timerLed );
-              LED_Off( LED_RED1);
-              LED_Off( LED_RED2 ) ; 
-              LED_Off( LED_GREEN ) ;
-              LED_Toggle( LED_BLUE );
-
-              // Send the reply to the PONG string
-              Buffer[0] = 'P';
-              Buffer[1] = 'O';
-              Buffer[2] = 'N';
-              Buffer[3] = 'G';
-              // We fill the buffer with numbers for the payload 
-              for( i = 4; i < BufferSize; i++ )
-              {
-                Buffer[i] = i - 4;
-              }
-              DelayMs( 1 );
-
-              Radio.Send( Buffer, BufferSize );
-              PRINTF("...PONG\n");
-            }
-            else // valid reception but not a PING as expected
-            {    // Set device as master and start again
-              isMaster = true;
-              Radio.Rx( RX_TIMEOUT_VALUE );
-            }
-         }
-      }
-      State = LOWPOWER;
-      break;
-    case TX:
-      // Indicates on a LED that we have sent a PING [Master]
-      // Indicates on a LED that we have sent a PONG [Slave]
-      //GpioWrite( &Led2, GpioRead( &Led2 ) ^ 1 );
-      Radio.Rx( RX_TIMEOUT_VALUE );
-      State = LOWPOWER;
-      break;
-    case RX_TIMEOUT:
-    case RX_ERROR:
-      if( isMaster == true )
-      {
-        // Send the next PING frame
-        Buffer[0] = 'P';
-        Buffer[1] = 'I';
-        Buffer[2] = 'N';
-        Buffer[3] = 'G';
-        for( i = 4; i < BufferSize; i++ )
-        {
-          Buffer[i] = i - 4;
+        else {
+            _buffer[0] = 'o';
+            _buffer[1] = 'n';
+            _buffer[2] = 0x00;
+            _buffer[3] = 0x00;
         }
-        DelayMs( 1 ); 
-        Radio.Send( Buffer, BufferSize );
-      }
-      else
-      {
-        Radio.Rx( RX_TIMEOUT_VALUE );
-      }
-      State = LOWPOWER;
-      break;
-    case TX_TIMEOUT:
-      Radio.Rx( RX_TIMEOUT_VALUE );
-      State = LOWPOWER;
-      break;
-    case LOWPOWER:
-      default:
-            // Set low power
-      break;
+        // We fill the buffer with numbers for the payload
+        for(i = 4; i < BUFFER_SIZE; i++) {
+            _buffer[i] = i - 4;
+        }
+        DelayMs(1);
+
+        // send  button state
+        Radio.Send(_buffer, BUFFER_SIZE);
+
+        // enter low power
+//        DISABLE_IRQ( );
+//        LowPower_Handler();
+        DelayMs(5000);
+//        ENABLE_IRQ();
     }
-    
-    DISABLE_IRQ( );
-    /* if an interupt has occured after __disable_irq, it is kept pending 
-     * and cortex will not enter low power anyway  */
-    if (State == LOWPOWER)
-    {
-#ifndef LOW_POWER_DISABLE
-      LowPower_Handler( );
 #endif
+
+#define RECEIVER
+#ifdef RECEIVER
+    while(true) {
+        rxTimeoutFlag = false;
+        Radio.Rx(RX_TIMEOUT_VALUE);
+        while(!rxTimeoutFlag);
     }
-    ENABLE_IRQ( );
-       
-  }
+#endif
 }
 
-void OnTxDone( void )
+
+void OnTxDone(void)
 {
-    Radio.Sleep( );
-    State = TX;
+    Radio.Sleep();
+//    _state = ST_TX;
     PRINTF("OnTxDone\n");
 }
 
-void OnRxDone( uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr )
-{
-    Radio.Sleep( );
-    BufferSize = size;
-    memcpy( Buffer, payload, BufferSize );
+void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
+    uint32_t copySize;
+
+    Radio.Sleep();
+    if(size < BUFFER_SIZE) {
+        copySize = size;
+    }
+    else {
+        copySize = BUFFER_SIZE;
+    }
+    memcpy(_buffer, payload, copySize);
     RssiValue = rssi;
     SnrValue = snr;
-    State = RX;
+//    _state = ST_RX;
+    rxTimeoutFlag = true;
   
+    PRINTF(_buffer);
+    PRINTF("\n");
     PRINTF("OnRxDone\n");
     PRINTF("RssiValue=%d dBm, SnrValue=%d\n", rssi, snr);
 }
 
 void OnTxTimeout( void )
 {
-    Radio.Sleep( );
-    State = TX_TIMEOUT;
-  
+    Radio.Sleep();
+//    _state = ST_TX_TIMEOUT;
     PRINTF("OnTxTimeout\n");
 }
 
-void OnRxTimeout( void )
+void OnRxTimeout(void)
 {
-    Radio.Sleep( );
-    State = RX_TIMEOUT;
+    Radio.Sleep();
+//    _state = ST_RX_TIMEOUT;
+    rxTimeoutFlag = true;
     PRINTF("OnRxTimeout\n");
 }
 
-void OnRxError( void )
+void OnRxError(void)
 {
-    Radio.Sleep( );
-    State = RX_ERROR;
+    Radio.Sleep();
+//    _state = ST_RX_ERROR;
+    rxTimeoutFlag = true;
     PRINTF("OnRxError\n");
 }
 
-static void OnledEvent( void )
+static void OnledEvent(void)
 {
   LED_Toggle( LED_BLUE ) ; 
   LED_Toggle( LED_RED1 ) ; 
@@ -431,5 +354,10 @@ static void OnledEvent( void )
   LED_Toggle( LED_GREEN ) ;   
 
   TimerStart(&timerLed );
+}
+
+void OnUserButtonEvent(void)
+{
+    PRINTF("UserButton\n");
 }
 
