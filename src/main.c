@@ -122,26 +122,10 @@ Maintainer: Miguel Luis and Gregory Cristian
                    LED_Off( LED_GREEN2 ) ; \
                    } while(0) ;
 
-//typedef enum {
-//    ST_LOW_POWER,
-//    ST_RX,
-//    ST_RX_TIMEOUT,
-//    ST_RX_ERROR,
-//    ST_TX,
-//    ST_TX_TIMEOUT,
-//} States;
-//
-//
-//const uint8_t PingMsg[] = "PING";
-//const uint8_t PongMsg[] = "PONG";
 
-uint8_t _buffer[BUFFER_SIZE];
-//States _state = ST_LOW_POWER;
-
-int8_t RssiValue = 0;
-int8_t SnrValue = 0;
-
-uint32_t rxTimeoutFlag;
+uint8_t buffer[BUFFER_SIZE];
+volatile uint32_t rxTimeoutFlag;
+volatile uint32_t rxDataFlag;
 
  /* Led Timers objects*/
 static  TimerEvent_t timerLed;
@@ -193,8 +177,6 @@ static void OnUserButtonEvent(void);
  * Main application entry point.
  */
 int main(void) {
-    uint8_t i;
-
     HAL_Init();
     SystemClock_Config();
     DBG_Init();
@@ -208,7 +190,7 @@ int main(void) {
     TimerInit(&timerLed, OnledEvent);
     TimerSetValue(&timerLed, LED_PERIOD_MS);
 
-    TimerStart(&timerLed );
+    TimerStart(&timerLed);
 
     // Radio initialization
     RadioEvents.TxDone = OnTxDone;
@@ -250,35 +232,41 @@ int main(void) {
 
 //#define SENDER
 #ifdef SENDER
+    uint32_t old_state = BSP_PB_GetState(BUTTON_USER);
+    uint32_t state = old_state;
+
     while(true) {
         // exit low power
 
         // read button state
-        if(BSP_PB_GetState(BUTTON_USER)) {
-            _buffer[0] = 'o';
-            _buffer[1] = 'f';
-            _buffer[2] = 'f';
-            _buffer[3] = 0x00;
-        }
-        else {
-            _buffer[0] = 'o';
-            _buffer[1] = 'n';
-            _buffer[2] = 0x00;
-            _buffer[3] = 0x00;
-        }
-        // We fill the buffer with numbers for the payload
-        for(i = 4; i < BUFFER_SIZE; i++) {
-            _buffer[i] = i - 4;
-        }
-        DelayMs(1);
+        state = BSP_PB_GetState(BUTTON_USER);
+        if(state != old_state) {
+            if(state) {
+                buffer[0] = 'o';
+                buffer[1] = 'f';
+                buffer[2] = 'f';
+                buffer[3] = 0x00;
+            }
+            else {
+                buffer[0] = 'o';
+                buffer[1] = 'n';
+                buffer[2] = 0x00;
+                buffer[3] = 0x00;
+            }
 
-        // send  button state
-        Radio.Send(_buffer, BUFFER_SIZE);
+    //        DelayMs(1);
+
+            // send  button state
+            PRINTF(buffer);
+            PRINTF("\n");
+            Radio.Send(buffer, BUFFER_SIZE);
+        }
+        old_state = state;
 
         // enter low power
 //        DISABLE_IRQ( );
 //        LowPower_Handler();
-        DelayMs(5000);
+        DelayMs(200);
 //        ENABLE_IRQ();
     }
 #endif
@@ -287,37 +275,31 @@ int main(void) {
 #ifdef RECEIVER
     while(true) {
         rxTimeoutFlag = false;
+        rxDataFlag = false;
         Radio.Rx(RX_TIMEOUT_VALUE);
-        while(!rxTimeoutFlag);
+        while(!rxTimeoutFlag && !rxDataFlag);
     }
 #endif
 }
 
-
 void OnTxDone(void)
 {
     Radio.Sleep();
-//    _state = ST_TX;
     PRINTF("OnTxDone\n");
 }
 
 void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
-    uint32_t copySize;
+    char str[10] = {0};
+    uint32_t i;
 
-    Radio.Sleep();
-    if(size < BUFFER_SIZE) {
-        copySize = size;
+    //check for board unique ID
+
+    for(i = 0; (i < size) && (i < 9); i++) {
+        str[i] = payload[i];
     }
-    else {
-        copySize = BUFFER_SIZE;
-    }
-    memcpy(_buffer, payload, copySize);
-    RssiValue = rssi;
-    SnrValue = snr;
-//    _state = ST_RX;
-    rxTimeoutFlag = true;
-  
-    PRINTF(_buffer);
+
+    rxDataFlag = true;
+    PRINTF(str);
     PRINTF("\n");
     PRINTF("OnRxDone\n");
     PRINTF("RssiValue=%d dBm, SnrValue=%d\n", rssi, snr);
@@ -326,14 +308,12 @@ void OnRxDone(uint8_t *payload, uint16_t size, int16_t rssi, int8_t snr) {
 void OnTxTimeout( void )
 {
     Radio.Sleep();
-//    _state = ST_TX_TIMEOUT;
     PRINTF("OnTxTimeout\n");
 }
 
 void OnRxTimeout(void)
 {
     Radio.Sleep();
-//    _state = ST_RX_TIMEOUT;
     rxTimeoutFlag = true;
     PRINTF("OnRxTimeout\n");
 }
@@ -341,7 +321,6 @@ void OnRxTimeout(void)
 void OnRxError(void)
 {
     Radio.Sleep();
-//    _state = ST_RX_ERROR;
     rxTimeoutFlag = true;
     PRINTF("OnRxError\n");
 }
